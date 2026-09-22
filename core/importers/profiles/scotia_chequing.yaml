@@ -1,0 +1,19 @@
+# PLACEHOLDER profile — column names and date format are made up.
+# Replace once the real Scotiabank chequing CSV header + one fake example row
+# for a purchase and a deposit are supplied (see spec section 14).
+id: scotia_chequing
+display_name: Scotiabank Chequing
+detect:
+  headers: ["Date", "Description", "Funds Withdrawn", "Funds Deposited"]
+parse:
+  encoding: utf-8-sig
+  skip_rows: 0
+  date_column: Date
+  date_format: "%Y-%m-%d"
+  description_columns: [Description]
+  amount:
+    mode: debit_credit
+    debit_column: "Funds Withdrawn"
+    credit_column: "Funds Deposited"
+  currency_column: null
+  skip_if: []

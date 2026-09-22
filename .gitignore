@@ -1,0 +1,27 @@
+# Real financial data must never be committed.
+*.db
+*.db-journal
+*.csv
+data/
+backups/
+.env
+
+# ...except fake fixtures used by the test suite.
+!tests/fixtures/*.csv
+!tests/fixtures/**/*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
