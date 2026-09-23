@@ -56,77 +56,85 @@ if not accounts:
 account_name_by_id = {a["id"]: a["name"] for a in accounts}
 
 # ---------------------------------------------------------------------------
-# Transfer queues
+# Transfer queues + Filters, side by side to save vertical space
 # ---------------------------------------------------------------------------
-with st.expander("Transfer pairs", expanded=False):
-    if st.button("Re-run transfer detection"):
-        applied = apply_auto_pairing(conn)
-        _flash(f"Auto-paired {applied} transfer(s).")
-        st.rerun()
+top_left, top_right = st.columns(2)
 
-    def _txn_label(txn_id: int) -> str:
-        row = conn.execute(
-            "SELECT t.txn_date, t.description, t.amount, a.name AS account_name "
-            "FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?",
-            (txn_id,),
-        ).fetchone()
-        return f"{row['txn_date']} | {row['account_name']} | {row['description']} | ${row['amount'] / 100:.2f}"
+with top_left:
+    with st.expander("Transfer pairs", expanded=False):
+        if st.button("Re-run transfer detection"):
+            applied = apply_auto_pairing(conn)
+            _flash(f"Auto-paired {applied} transfer(s).")
+            st.rerun()
 
-    st.markdown("**Suggested transfer pairs** (no PAYMENT/TRANSFER keyword match — confirm by hand)")
-    suggested = get_suggested_pairs(conn)
-    if not suggested:
-        st.caption("None right now.")
-    else:
-        for pair in suggested:
-            c1, c2, c3 = st.columns([4, 4, 1])
-            c1.write(_txn_label(pair["txn_a_id"]))
-            c2.write(_txn_label(pair["txn_b_id"]))
-            if c3.button("Confirm", key=f"confirm_{pair['txn_a_id']}_{pair['txn_b_id']}"):
-                confirm_pair(conn, pair["txn_a_id"], pair["txn_b_id"])
-                st.rerun()
+        def _txn_label(txn_id: int) -> str:
+            row = conn.execute(
+                "SELECT t.txn_date, t.description, t.amount, a.name AS account_name "
+                "FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?",
+                (txn_id,),
+            ).fetchone()
+            return f"{row['txn_date']} | {row['account_name']} | {row['description']} | ${row['amount'] / 100:.2f}"
 
-    st.markdown("**Unmatched transfers** (typed transfer, but no partner found yet)")
-    unmatched = get_unmatched_transfers(conn)
-    if not unmatched:
-        st.caption("None right now.")
-    else:
-        st.table(
-            [
-                {
-                    "Date": u["txn_date"],
-                    "Account": u["account_name"],
-                    "Description": u["description"],
-                    "Amount": f"${u['amount'] / 100:.2f}",
-                }
-                for u in unmatched
-            ]
-        )
+        st.markdown("**Suggested transfer pairs** (no PAYMENT/TRANSFER keyword match — confirm by hand)")
+        suggested = get_suggested_pairs(conn)
+        if not suggested:
+            st.caption("None right now.")
+        else:
+            for pair in suggested:
+                c1, c2, c3 = st.columns([4, 4, 1])
+                c1.write(_txn_label(pair["txn_a_id"]))
+                c2.write(_txn_label(pair["txn_b_id"]))
+                if c3.button("Confirm", key=f"confirm_{pair['txn_a_id']}_{pair['txn_b_id']}"):
+                    confirm_pair(conn, pair["txn_a_id"], pair["txn_b_id"])
+                    st.rerun()
 
-# ---------------------------------------------------------------------------
-# Filters
-# ---------------------------------------------------------------------------
-with st.expander("Filters", expanded=True):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        date_from = st.date_input("From", value=None)
-        date_to = st.date_input("To", value=None)
-    with col2:
-        account_filter = st.multiselect(
-            "Account", options=[a["id"] for a in accounts],
-            format_func=lambda aid: next(a["name"] for a in accounts if a["id"] == aid),
-        )
-        type_filter = st.multiselect("Type", options=TYPES)
-    with col3:
-        category_filter = st.selectbox("Category", options=["All"] + [c["label"] for c in categories])
-        unreviewed_only = st.checkbox("Unreviewed only")
+        st.markdown("**Unmatched transfers** (typed transfer, but no partner found yet)")
+        unmatched = get_unmatched_transfers(conn)
+        if not unmatched:
+            st.caption("None right now.")
+        else:
+            st.table(
+                [
+                    {
+                        "Date": u["txn_date"],
+                        "Account": u["account_name"],
+                        "Description": u["description"],
+                        "Amount": f"${u['amount'] / 100:.2f}",
+                    }
+                    for u in unmatched
+                ]
+            )
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        amount_min = st.number_input("Min amount ($, absolute)", value=0.0, step=1.0)
-    with col5:
-        amount_max = st.number_input("Max amount ($, absolute, 0 = no max)", value=0.0, step=1.0)
-    with col6:
-        search_text = st.text_input("Search description / note")
+with top_right:
+    with st.expander("Filters", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            date_from = st.date_input("From", value=None)
+            date_to = st.date_input("To", value=None)
+        with col2:
+            account_filter = st.multiselect(
+                "Account", options=[a["id"] for a in accounts],
+                format_func=lambda aid: next(a["name"] for a in accounts if a["id"] == aid),
+            )
+            type_filter = st.multiselect("Type", options=TYPES)
+        with col3:
+            category_filter = st.selectbox("Category", options=["All"] + [c["label"] for c in categories])
+            unreviewed_only = st.checkbox(
+                "Unreviewed only",
+                value=True,
+                help=(
+                    "On by default so new imports don't get buried under everything you've "
+                    "already reviewed — uncheck to browse full history."
+                ),
+            )
+
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            amount_min = st.number_input("Min amount ($, absolute)", value=0.0, step=1.0)
+        with col5:
+            amount_max = st.number_input("Max amount ($, absolute, 0 = no max)", value=0.0, step=1.0)
+        with col6:
+            search_text = st.text_input("Search description / note")
 
 # ---------------------------------------------------------------------------
 # Query
@@ -228,10 +236,18 @@ original_df = df.copy()
 # of a stale in-progress edit.
 grid_generation = st.session_state.get("grid_generation", 0)
 
+# Size the grid to the actual row count — a couple of rows shouldn't render
+# with a wall of empty grid lines below them. Caps at the old fixed height
+# once there's enough data to actually need scrolling.
+MAX_GRID_HEIGHT = 420
+ROW_HEIGHT = 35
+HEADER_HEIGHT = 38
+grid_height = min(HEADER_HEIGHT + ROW_HEIGHT * len(df) + 3, MAX_GRID_HEIGHT)
+
 edited_df = st.data_editor(
     df,
     use_container_width=True,
-    height=420,
+    height=grid_height,
     hide_index=True,
     column_config={
         "Date": st.column_config.TextColumn(disabled=True),

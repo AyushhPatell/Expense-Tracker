@@ -38,7 +38,7 @@ def _spending_lines(conn, start_date: str, end_date: str) -> list:
     placeholders = ",".join("?" * len(SPENDING_TYPES))
     return conn.execute(
         f"""
-        SELECT t.id AS txn_id, t.description, t.account_id, a.name AS account_name,
+        SELECT t.id AS txn_id, t.txn_date, t.description, t.account_id, a.name AS account_name,
                COALESCE(parent.name, cat.name) AS category, s.amount AS amount
         FROM splits s
         JOIN transactions t ON t.id = s.transaction_id
@@ -51,7 +51,7 @@ def _spending_lines(conn, start_date: str, end_date: str) -> list:
 
         UNION ALL
 
-        SELECT t.id AS txn_id, t.description, t.account_id, a.name AS account_name,
+        SELECT t.id AS txn_id, t.txn_date, t.description, t.account_id, a.name AS account_name,
                NULL AS category, t.amount AS amount
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
@@ -83,6 +83,25 @@ def spending_by_category(conn, start_date: str, end_date: str) -> list[dict]:
     return sorted(
         [{"category": k, "amount": v} for k, v in totals.items()],
         key=lambda x: x["amount"],
+    )
+
+
+def spending_lines_for_category(conn, start_date: str, end_date: str, category: str) -> list[dict]:
+    """The individual lines behind one bar in spending_by_category — what's
+    actually in that total, for a 'what did I spend it on' drill-down."""
+    rows = _spending_lines(conn, start_date, end_date)
+    matches = [r for r in rows if (r["category"] or "Uncategorized") == category]
+    return sorted(
+        [
+            {
+                "txn_date": r["txn_date"],
+                "description": r["description"],
+                "account": r["account_name"],
+                "amount": r["amount"],
+            }
+            for r in matches
+        ],
+        key=lambda r: r["amount"],
     )
 
 

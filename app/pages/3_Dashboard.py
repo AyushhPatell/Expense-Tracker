@@ -15,6 +15,7 @@ from core.reports import (
     month_bounds,
     spending_by_account,
     spending_by_category,
+    spending_lines_for_category,
     splitwise_totals,
     top_merchants,
     total_income,
@@ -105,6 +106,16 @@ if spend_only:
         )
     )
     st.altair_chart(chart, use_container_width=True)
+
+    category_options = df_cat.sort_values("Amount", ascending=False)["Category"].tolist()
+    drill_choice = st.selectbox("See what's in a category", options=category_options, key="category_drilldown")
+    lines = spending_lines_for_category(conn, start_date, end_date, drill_choice)
+    st.table(
+        [
+            {"Date": ln["txn_date"], "Description": ln["description"], "Account": ln["account"], "Amount": f"${-ln['amount'] / 100:,.2f}"}
+            for ln in lines
+        ]
+    )
 else:
     st.caption("No spending recorded for this period.")
 

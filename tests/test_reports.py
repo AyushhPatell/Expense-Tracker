@@ -5,6 +5,7 @@ from core.reports import (
     month_bounds,
     spending_by_account,
     spending_by_category,
+    spending_lines_for_category,
     splitwise_totals,
     top_merchants,
     total_income,
@@ -123,6 +124,29 @@ def test_spending_by_category_rolls_up_to_parent(db_conn, fixtures_dir):
     assert by_cat["Housing"] == -35100  # Rent rolls up to its parent
     assert by_cat["Fees & Interest"] == -1
     assert "Uncategorized" not in by_cat  # bill payment (transfer) shouldn't leak in here
+
+
+def test_spending_lines_for_category_matches_the_total(db_conn, fixtures_dir):
+    _setup_august_scenario(db_conn, fixtures_dir)
+    start, end = month_bounds(2025, 8)
+
+    coffee_lines = spending_lines_for_category(db_conn, start, end, "Coffee")
+    assert len(coffee_lines) == 3
+    assert sum(line["amount"] for line in coffee_lines) == -1150
+    assert all(line["description"] for line in coffee_lines)
+    assert all(line["txn_date"] for line in coffee_lines)
+
+    housing_lines = spending_lines_for_category(db_conn, start, end, "Housing")
+    assert len(housing_lines) == 1  # just the $351 category line, not the receivable lines
+    assert housing_lines[0]["amount"] == -35100
+
+
+def test_spending_lines_for_uncategorized(db_conn, fixtures_dir):
+    acc = account_id(db_conn, "Scotia Chequing")
+    import_file(db_conn, acc, "scotia_sample.csv", (fixtures_dir / "scotia_sample.csv").read_bytes())
+    start, end = month_bounds(2025, 8)
+    lines = spending_lines_for_category(db_conn, start, end, "Uncategorized")
+    assert len(lines) == 8  # every fixture row, all still unreviewed/uncategorized
 
 
 def test_transfer_by_category_tracks_tuition_separately_from_spending(db_conn, fixtures_dir):
