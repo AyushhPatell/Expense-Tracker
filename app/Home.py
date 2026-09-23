@@ -36,8 +36,11 @@ else:
     st.info("No accounts configured yet.")
 
 st.divider()
-st.write("Go to **Import** in the sidebar to upload a bank CSV.")
+st.write(
+    "Go to **Import** to upload a bank CSV, **Review** to classify transactions, "
+    "or **Dashboard** to see your spending."
+)
 st.caption(
     f"{batch_count} import batch(es) so far. "
-    "Review, dashboards, rules, and budgets land in later phases."
+    "Rules and budgets land in later phases."
 )

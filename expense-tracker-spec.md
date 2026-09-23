@@ -377,6 +377,11 @@ Paying Rogers from Scotia creates two rows: `-500.00` on Scotia and `+500.00` on
 - **Unmatched transfers:** if one side is marked `transfer` but its partner hasn't been imported yet, show it in an "Unmatched transfers" list. It still stays out of spending.
 - Handles partial and multiple card payments naturally, since each payment pairs independently.
 
+### 8.1a Transfers to accounts outside this tool
+Some outgoing transfers never have a matching side to pair against — money moved into an investment account, RRSP, TFSA, savings, or anywhere else this tool doesn't import from (e.g. a Wealthsimple contribution). These still aren't spending, so they still get `type = transfer`, but since there's no partner transaction to link, they'll sit in the "Unmatched transfers" list permanently — that's expected, not a sign something's broken, and no different in effect from a matched transfer (still excluded from spending either way).
+
+Unlike a plain account-to-account transfer, it's still useful to know *how much* is going into investments over time. A transfer-typed transaction can still carry a normal category split (the type-level exclusion from spending always wins regardless of category, per 5.3), so these get categorized under **Investments** — giving a filterable, reportable total without it ever counting as spending.
+
 ### 8.2 Splits and "owed to me"
 Any transaction can be split into lines. Each line has an amount, and either a category (my spending) or a person (owed to me).
 
@@ -397,6 +402,12 @@ Effects:
 - The Dashboard and Home totals show a separate **"Via Splitwise"** figure alongside category spending, so "what I actually spent" and "what I fronted through Splitwise" are never conflated.
 - Unlike a roommate's direct e-transfer, a Splitwise line isn't expected to close out via one matching incoming transfer — Splitwise nets multiple expenses and settles later, sometimes as a single lump payment covering several unrelated Splitwise lines. So these lines are allowed to sit open indefinitely; Section 8.3's reimbursement linking is optional here, not required to "finish" a transaction.
 - Future idea (Section 15): export the list of Splitwise-tagged lines for a period, to cross-check against what's actually entered in the Splitwise app.
+
+**The reverse case — settling a Splitwise debt I owe:** just as common as fronting one. Someone else covers something in Splitwise, it nets out that I owe my share, and I pay them back directly (an e-transfer to them, not through Splitwise itself). This is the mirror image of the example above: the *whole* transaction is Splitwise-related, not a fraction of it.
+- `type = expense` (this is genuinely my spending, just never showed up as a bank-visible purchase since someone else paid).
+- One split line, covering the full amount, `is_splitwise = 1`, no category, no person.
+- Same exclusion applies: this line is a receivable-shaped exclusion from category spending, and counts toward "Via Splitwise" — just as an outflow instead of the usual inflow.
+- `is_splitwise` isn't tied to a sign: it can appear on an outgoing line (I owe, I'm paying it off — this case) or an incoming one (someone settles a Splitwise debt they owe me, `type = reimbursement`). The Dashboard's "Via Splitwise" figure should show these as separate **sent** and **received** sub-totals, not just one net number, so both directions stay visible (Section 11).
 
 ### 8.3 Reimbursements
 An incoming e-transfer from a roommate is `reimbursement`, not income.
@@ -474,11 +485,11 @@ For the selected period (with completeness warning):
 - Month-over-month trend per category (last 6/12 months).
 - Top merchants.
 - Account breakdown (where the spending happened).
-- A separate "Via Splitwise" total for the period (sum of `is_splitwise` split lines — see 8.2a), shown next to spending, not inside it.
+- A separate "Via Splitwise" section for the period (`is_splitwise` split lines — see 8.2a), broken into **sent** (outgoing lines — dinners I fronted, debts I settled) and **received** (incoming lines — Splitwise debts paid back to me), not one net figure. Shown next to spending, not inside it.
 All spending numbers exclude transfers, receivable splits (including Splitwise lines), and ignored rows, and subtract refunds.
 
 ### 4. Owed to Me
-Per person: total owed, total reimbursed, balance, and the list of open items with dates. Click an item to see the original transaction. Option to mark an item as forgiven/settled manually. A separate "Via Splitwise" section totals open Splitwise lines (Section 8.2a) — these aren't tied to a specific person and aren't expected to close out one-for-one against a reimbursement.
+Per person: total owed, total reimbursed, balance, and the list of open items with dates. Click an item to see the original transaction. Option to mark an item as forgiven/settled manually. A separate "Via Splitwise" section totals open Splitwise lines (Section 8.2a), split into sent/received the same as the Dashboard — these aren't tied to a specific person and aren't expected to close out one-for-one against a reimbursement.
 
 ### 5. Rules
 List with priority (reorderable), enabled toggle, times applied. Editor with a condition/action builder (no raw JSON needed, but a JSON view is available), test against existing data, and dry-run preview.
@@ -490,7 +501,7 @@ Monthly budget per category, actual vs budget with progress bars, over-budget hi
 Accounts (add/edit, assign profile), categories (tree, add/rename/merge/deactivate; merging reassigns splits), people and their name aliases, month definition, transfer matching window, backup/restore, export, delete batch.
 
 ### Default categories (editable seed)
-Housing (Rent, Utilities, Internet, Tenant Insurance) · Groceries · Eating Out · Coffee · Transportation (Transit, Rideshare, Fuel) · Phone · Subscriptions · Shopping · Health & Fitness (Gym, Pharmacy, Supplements) · Education (Tuition, Books) · Entertainment · Travel · Gifts · Personal Care · Fees & Interest · Other · Income (Salary, Other Income) · system: "Owed to me".
+Housing (Rent, Utilities, Internet, Tenant Insurance, Laundry) · Groceries · Eating Out · Coffee · Transportation (Transit, Rideshare, Fuel) · Phone · Subscriptions · Shopping · Health & Fitness (Gym, Pharmacy, Supplements) · Education (Tuition, Books) · Entertainment · Travel · Gifts · Personal Care · Fees & Interest · Investments (see 8.1a — used on `transfer`-typed transactions, never counted as spending) · Other · Income (Salary, Other Income) · system: "Owed to me".
 
 ---
 

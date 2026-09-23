@@ -18,6 +18,18 @@ st.title("Import bank CSVs")
 
 conn = init_db()
 
+
+def _flash(message: str, icon: str = "✅") -> None:
+    """Queue a short toast for the next render — a toast fired in the same
+    run as st.rerun() never reaches the browser, since the rerun cuts the
+    run off first."""
+    st.session_state["_flash_message"] = (message, icon)
+
+
+if "_flash_message" in st.session_state:
+    _msg, _icon = st.session_state.pop("_flash_message")
+    st.toast(_msg, icon=_icon)
+
 accounts = conn.execute("SELECT * FROM accounts WHERE active = 1 ORDER BY name").fetchall()
 if not accounts:
     st.error("No accounts configured. Add one in Settings first.")
@@ -75,7 +87,21 @@ if uploaded_files:
             key=f"account_select_{uf.name}",
         )
         chosen_account = account_by_id[chosen_id]
-        selections[uf.name] = (uf, chosen_account)
+
+        min_date = st.date_input(
+            f"Only import transactions on/after (optional) — {uf.name}",
+            value=None,
+            key=f"min_date_{uf.name}",
+            help=(
+                "Leave blank to import everything in the file. Set this when a statement "
+                "overlaps history you've deliberately decided not to track — e.g. importing "
+                "last month's statement just to fill a coverage gap without pulling in a "
+                "stretch of older transactions. Rows before this date are never inserted, "
+                "not even as 'ignore' — they simply aren't written to the database."
+            ),
+        )
+        min_date_iso = min_date.isoformat() if min_date else None
+        selections[uf.name] = (uf, chosen_account, min_date_iso)
 
         profile = profile_by_id.get(chosen_account["profile_id"])
         if profile is None:
@@ -85,9 +111,9 @@ if uploaded_files:
         try:
             raw_rows, _ = parse_csv(file_bytes, profile)
             preview_rows = []
-            for raw in raw_rows[:5]:
+            for raw in raw_rows:
                 norm = normalize_row(raw, profile)
-                if norm:
+                if norm and (not min_date_iso or norm["txn_date"] >= min_date_iso):
                     preview_rows.append(
                         {
                             "Date": norm["txn_date"],
@@ -95,22 +121,24 @@ if uploaded_files:
                             "Amount": f"{norm['amount_cents'] / 100:.2f}",
                         }
                     )
+                if len(preview_rows) >= 5:
+                    break
             if preview_rows:
                 st.dataframe(preview_rows, use_container_width=True)
             else:
-                st.info("No previewable rows found with this profile — check the account selection.")
+                st.info("No previewable rows found with this profile/cutoff — check the account selection.")
         except Exception as exc:  # malformed file / wrong profile picked
             st.error(f"Couldn't preview this file with the selected profile: {exc}")
 
     if st.button("Import all files", type="primary"):
         results = []
-        for filename, (uf, chosen_account) in selections.items():
-            result = import_file(conn, chosen_account["id"], filename, uf.getvalue())
+        for filename, (uf, chosen_account, min_date_iso) in selections.items():
+            result = import_file(conn, chosen_account["id"], filename, uf.getvalue(), min_date=min_date_iso)
             result["file_name"] = filename
             result["account"] = chosen_account["name"]
             results.append(result)
 
-        st.success("Import complete.")
+        _flash("Import complete.")
         st.dataframe(
             [
                 {
@@ -120,6 +148,8 @@ if uploaded_files:
                     "New": r["rows_new"],
                     "Duplicates": r["rows_duplicate"],
                     "Skipped": r["rows_skipped"],
+                    "Before cutoff": r["rows_before_cutoff"],
+                    "Transfers paired": r["transfers_paired"],
                     "Date range": f"{r['date_from']} – {r['date_to']}" if r["date_from"] else "n/a",
                 }
                 for r in results

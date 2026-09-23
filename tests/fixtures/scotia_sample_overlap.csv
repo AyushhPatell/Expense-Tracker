@@ -1,5 +1,5 @@
-Date,Description,Funds Withdrawn,Funds Deposited,Balance
-2025-08-25,COFFEE SHOP PURCHASE,3.50,,2194.50
-2025-08-25,COFFEE SHOP PURCHASE,3.50,,2191.00
-2025-09-01,PAYROLL DEPOSIT ACME CORP,,2200.00,4391.00
-2025-09-05,GROCERY STORE PURCHASE,88.10,,4302.90
+Date,Description,Sub-description,Type of Transaction,Amount,Balance
+2025-08-25,pos purchase,Fake Coffee Shop,Debit,-3.50,2194.50
+2025-08-25,pos purchase,Fake Coffee Shop,Debit,-3.50,2191.00
+2025-09-01,payroll deposit,Fake Employer Inc.,Credit,2200.00,4391.00
+2025-09-05,pos purchase,Fake Grocery Store,Debit,-88.10,4302.90

@@ -1,5 +1,9 @@
 [server]
-address = "127.0.0.1"
+# Was "127.0.0.1" (loopback-only, per spec section 10). Widened to all
+# interfaces so it's reachable over Tailscale for remote access while out.
+# Revert to "127.0.0.1" when remote access isn't needed, to go back to the
+# spec's local-only default.
+address = "0.0.0.0"
 headless = true
 
 [browser]

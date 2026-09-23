@@ -25,9 +25,8 @@ def normalize_row(raw_row: dict, profile: dict) -> dict | None:
             posted_date = None
 
     desc_cols = parse_cfg.get("description_columns", [])
-    description = " | ".join(
-        str(raw_row[c]).strip() for c in desc_cols if raw_row.get(c) not in (None, "")
-    )
+    description_parts = [str(raw_row.get(c) or "").strip() for c in desc_cols]
+    description = " | ".join(part for part in description_parts if part)
 
     amount_cents = _resolve_amount(raw_row, parse_cfg["amount"])
 

@@ -1,20 +1,40 @@
-# PLACEHOLDER profile — column names and date format are made up.
-# Replace once the real Rogers Mastercard CSV header + one fake example row
-# for a purchase and a payment received are supplied (see spec section 14).
+# Real Rogers Mastercard CSV export format (confirmed against a real export
+# with values redacted; this profile itself contains no personal data).
 id: rogers_mc
 display_name: Rogers Mastercard
 detect:
-  headers: ["Date", "Posted Date", "Description", "Amount"]
+  headers:
+    - "Date"
+    - "Posted Date"
+    - "Reference Number"
+    - "Activity Type"
+    - "Activity Status"
+    - "Card Number"
+    - "Merchant Category Description"
+    - "Merchant Name"
+    - "Merchant City"
+    - "Merchant State or Province"
+    - "Merchant Country Code"
+    - "Merchant Postal Code"
+    - "Amount"
+    - "Rewards"
+    - "Name on Card"
 parse:
   encoding: utf-8-sig
   skip_rows: 0
   date_column: Date
   posted_date_column: Posted Date
   date_format: "%Y-%m-%d"
-  description_columns: [Description]
+  description_columns: [Merchant Name]
   amount:
+    # Purchases export as positive "$12.34"; payments/credits/rebates export
+    # as negative "-$12.34". invert flips both to our canonical convention
+    # (purchase -> negative expense, payment/credit -> positive).
     mode: single
     column: Amount
     invert: true
   currency_column: null
+  # Confirmed: Rogers' CSV export only ever includes approved transactions —
+  # pending ones are simply omitted, never present with a different status.
+  # So there's nothing to filter here.
   skip_if: []

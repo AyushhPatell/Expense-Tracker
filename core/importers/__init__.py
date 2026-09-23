@@ -4,6 +4,7 @@ from core.fingerprint import assign_occurrence_indexes, compute_fingerprint
 from core.importers.detect import load_profiles
 from core.importers.normalize import normalize_row
 from core.importers.parse import parse_csv
+from core.transfers import apply_auto_pairing
 
 
 def get_profile_for_account(conn, account_id: int) -> dict:
@@ -17,20 +18,30 @@ def get_profile_for_account(conn, account_id: int) -> dict:
     return profile
 
 
-def import_file(conn, account_id: int, filename: str, file_bytes: bytes) -> dict:
+def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_date: str | None = None) -> dict:
     """Parse, normalize, deduplicate, and insert one uploaded CSV file for one account.
 
     Raw bank data is never edited: this only ever inserts new transaction rows.
+
+    min_date (ISO date string), when given, drops rows dated before it before
+    they're ever inserted — e.g. importing an overlapping statement just to
+    fill a coverage gap, without pulling in a stretch of history you've
+    deliberately decided not to track. This is a hard exclusion, not a
+    'reviewed as ignore' marker: those rows never touch the database at all.
     """
     profile = get_profile_for_account(conn, account_id)
     raw_rows, skipped_parse = parse_csv(file_bytes, profile)
 
     normalized = []
     skipped_unparseable = 0
+    skipped_before_cutoff = 0
     for raw_row in raw_rows:
         norm = normalize_row(raw_row, profile)
         if norm is None:
             skipped_unparseable += 1
+            continue
+        if min_date and norm["txn_date"] < min_date:
+            skipped_before_cutoff += 1
             continue
         normalized.append(norm)
 
@@ -90,12 +101,19 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes) -> dict
     )
     conn.commit()
 
+    # Post-import step (spec 6.4): re-run transfer detection so a payment on
+    # the other account, imported earlier or in this same batch, gets paired
+    # now that both sides exist.
+    transfers_paired = apply_auto_pairing(conn)
+
     return {
         "batch_id": batch_id,
         "rows_total": len(normalized),
         "rows_new": rows_new,
         "rows_duplicate": rows_duplicate,
         "rows_skipped": skipped_parse + skipped_unparseable,
+        "rows_before_cutoff": skipped_before_cutoff,
         "date_from": date_from,
         "date_to": date_to,
+        "transfers_paired": transfers_paired,
     }

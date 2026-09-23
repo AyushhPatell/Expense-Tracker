@@ -1,5 +1,5 @@
-Date,Posted Date,Description,Amount
-2025-07-05,2025-07-06,GROCERY STORE PURCHASE,45.23
-2025-07-10,2025-07-11,STREAMING SERVICE SUBSCRIPTION,15.99
-2025-07-20,2025-07-21,PAYMENT RECEIVED THANK YOU,-500.00
-2025-08-01,2025-08-02,COFFEE SHOP PURCHASE,3.75
+Date,Posted Date,Reference Number,Activity Type,Activity Status,Card Number,Merchant Category Description,Merchant Name,Merchant City,Merchant State or Province,Merchant Country Code,Merchant Postal Code,Amount,Rewards,Name on Card
+2025-07-05,2025-07-06,REF00000001,TRANS,APPROVED,****************,Grocery Stores and Supermarkets,Fake Grocery Store,Halifax,NS,CAN,B3J 0M2,$45.23,,* *****
+2025-07-10,2025-07-11,REF00000002,TRANS,APPROVED,****************,Large Digital Goods Merchant,Fake Streaming Service,Toronto,ON,CAN,M5J 0A8,$15.99,,* *****
+2025-07-20,2025-07-21,REF00000003,TRANS,APPROVED,****************,,PAYMENT THANK YOU,,,,,-$500.00,,* *****
+2025-08-01,2025-08-02,REF00000004,TRANS,APPROVED,****************,Eating Places and Restaurants,Fake Coffee Shop,Halifax,NS,CAN,B3J 1N9,$3.75,,* *****
