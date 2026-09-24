@@ -38,9 +38,7 @@ else:
 st.divider()
 st.write(
     "Go to **Import** to upload a bank CSV, **Review** to classify transactions, "
-    "or **Dashboard** to see your spending."
+    "**Dashboard** to see your spending, or **Settings** for accounts, categories, "
+    "people, and backups."
 )
-st.caption(
-    f"{batch_count} import batch(es) so far. "
-    "Rules and budgets land in later phases."
-)
+st.caption(f"{batch_count} import batch(es) so far.")

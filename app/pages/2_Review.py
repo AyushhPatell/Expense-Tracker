@@ -9,6 +9,8 @@ import streamlit as st
 
 from core.categories import create_person, list_categories, list_people
 from core.db import init_db
+from core.rules import create_rule, suggest_rule_draft, test_conditions_against_existing
+from core.settings import get_transfer_keywords, get_transfer_window_days
 from core.splits import (
     equal_shares,
     get_splits,
@@ -63,7 +65,9 @@ top_left, top_right = st.columns(2)
 with top_left:
     with st.expander("Transfer pairs", expanded=False):
         if st.button("Re-run transfer detection"):
-            applied = apply_auto_pairing(conn)
+            applied = apply_auto_pairing(
+                conn, window_days=get_transfer_window_days(conn), keywords=get_transfer_keywords(conn)
+            )
             _flash(f"Auto-paired {applied} transfer(s).")
             st.rerun()
 
@@ -75,8 +79,10 @@ with top_left:
             ).fetchone()
             return f"{row['txn_date']} | {row['account_name']} | {row['description']} | ${row['amount'] / 100:.2f}"
 
-        st.markdown("**Suggested transfer pairs** (no PAYMENT/TRANSFER keyword match — confirm by hand)")
-        suggested = get_suggested_pairs(conn)
+        st.markdown("**Suggested transfer pairs** (no keyword match — confirm by hand)")
+        suggested = get_suggested_pairs(
+            conn, window_days=get_transfer_window_days(conn), keywords=get_transfer_keywords(conn)
+        )
         if not suggested:
             st.caption("None right now.")
         else:
@@ -514,3 +520,48 @@ if st.button("Save split", type="primary", disabled=(remaining != 0)):
         st.rerun()
     except ValueError as exc:
         st.error(str(exc))
+
+# ---------------------------------------------------------------------------
+# Make this a rule (spec 7.3): pre-fill a rule from how this transaction is
+# already typed/categorized, so a recurring one (rent, payroll, coffee)
+# doesn't need to be classified by hand every single month.
+# ---------------------------------------------------------------------------
+with st.expander("Make this a rule"):
+    rule_draft_key = f"rule_from_txn_{detail_id}"
+    if rule_draft_key not in st.session_state:
+        st.session_state[rule_draft_key] = suggest_rule_draft(conn, detail_id)
+    rule_draft = st.session_state[rule_draft_key]
+
+    st.caption("Pre-filled from this transaction's current type/category and description/account/amount. Edit before saving.")
+    rule_draft["name"] = st.text_input("Rule name", value=rule_draft["name"], key=f"{rule_draft_key}_name")
+
+    keyword_leaf = rule_draft["conditions"]["all"][0]
+    keyword_leaf["value"] = st.text_input(
+        "Description contains", value=keyword_leaf["value"], key=f"{rule_draft_key}_keyword",
+        help="Real Scotia e-transfer descriptions are generic ('Free Interac E-Transfer') — the "
+        "account/direction/amount conditions below do the real narrowing for those.",
+    )
+    st.json(rule_draft["conditions"], expanded=False)
+    if rule_draft["actions"]:
+        st.caption("Actions: " + ", ".join(f"{k}={v}" for k, v in rule_draft["actions"].items()))
+    else:
+        st.caption("No type/category actions pre-filled — this transaction isn't simply categorized yet.")
+
+    if st.button("Test against existing transactions", key=f"{rule_draft_key}_test"):
+        st.session_state[f"{rule_draft_key}_test_result"] = test_conditions_against_existing(conn, rule_draft["conditions"])
+    test_result = st.session_state.get(f"{rule_draft_key}_test_result")
+    if test_result:
+        st.caption(f"Matches {test_result['total']} existing transaction(s).")
+
+    if st.button("Save as rule", type="primary", key=f"{rule_draft_key}_save"):
+        try:
+            create_rule(
+                conn, rule_draft["name"], rule_draft["conditions"], rule_draft["actions"],
+                priority=rule_draft["priority"], enabled=rule_draft["enabled"], stop_processing=rule_draft["stop_processing"],
+            )
+            _flash(f"Created rule '{rule_draft['name']}'. Edit further on the Rules page any time.")
+            del st.session_state[rule_draft_key]
+            st.session_state.pop(f"{rule_draft_key}_test_result", None)
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))

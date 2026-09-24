@@ -149,6 +149,7 @@ if uploaded_files:
                     "Duplicates": r["rows_duplicate"],
                     "Skipped": r["rows_skipped"],
                     "Before cutoff": r["rows_before_cutoff"],
+                    "Rules matched": r["rules_matched"],
                     "Transfers paired": r["transfers_paired"],
                     "Date range": f"{r['date_from']} – {r['date_to']}" if r["date_from"] else "n/a",
                 }

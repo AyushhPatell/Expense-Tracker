@@ -4,6 +4,8 @@ from core.fingerprint import assign_occurrence_indexes, compute_fingerprint
 from core.importers.detect import load_profiles
 from core.importers.normalize import normalize_row
 from core.importers.parse import parse_csv
+from core.rules import apply_rules_to_transactions
+from core.settings import get_transfer_keywords, get_transfer_window_days
 from core.transfers import apply_auto_pairing
 
 
@@ -63,6 +65,7 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_dat
     rows_new = 0
     rows_duplicate = 0
     dates = []
+    new_transaction_ids = []
 
     for row, occ_index in zip(normalized, occurrence_indexes):
         dates.append(row["txn_date"])
@@ -75,7 +78,7 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_dat
         if existing is not None:
             rows_duplicate += 1
             continue
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO transactions "
             "(account_id, batch_id, txn_date, posted_date, description, amount, currency, raw_row, fingerprint) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -92,6 +95,7 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_dat
             ),
         )
         rows_new += 1
+        new_transaction_ids.append(cur.lastrowid)
 
     date_from = min(dates) if dates else None
     date_to = max(dates) if dates else None
@@ -101,10 +105,14 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_dat
     )
     conn.commit()
 
-    # Post-import step (spec 6.4): re-run transfer detection so a payment on
-    # the other account, imported earlier or in this same batch, gets paired
-    # now that both sides exist.
-    transfers_paired = apply_auto_pairing(conn)
+    # Post-import steps (spec 6.4), in order: rules engine first, so a rule
+    # can type a payment as 'transfer' (e.g. "Scotia -> Rogers"), then
+    # transfer detection, which needs that new row (or its partner, imported
+    # earlier or in this same batch) to actually pair against.
+    rules_result = apply_rules_to_transactions(conn, new_transaction_ids)
+    transfers_paired = apply_auto_pairing(
+        conn, window_days=get_transfer_window_days(conn), keywords=get_transfer_keywords(conn)
+    )
 
     return {
         "batch_id": batch_id,
@@ -115,5 +123,6 @@ def import_file(conn, account_id: int, filename: str, file_bytes: bytes, min_dat
         "rows_before_cutoff": skipped_before_cutoff,
         "date_from": date_from,
         "date_to": date_to,
+        "rules_matched": rules_result["matched"],
         "transfers_paired": transfers_paired,
     }

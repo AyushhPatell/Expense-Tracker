@@ -35,11 +35,15 @@ def _spending_lines(conn, start_date: str, end_date: str) -> list:
     transactions, plus an implicit whole-amount line for any such
     transaction that has no splits at all (spec 5.3). Transfers, ignored
     rows, income, and reimbursements never appear here."""
+    # category_id is the split's OWN (leaf) category — unlike the
+    # COALESCE'd category NAME (parent-or-self, for the Dashboard's rolled-up
+    # display), this is what core/budgets.py needs to attribute spend to the
+    # exact category a budget was set on.
     placeholders = ",".join("?" * len(SPENDING_TYPES))
     return conn.execute(
         f"""
         SELECT t.id AS txn_id, t.txn_date, t.description, t.account_id, a.name AS account_name,
-               COALESCE(parent.name, cat.name) AS category, s.amount AS amount
+               COALESCE(parent.name, cat.name) AS category, cat.id AS category_id, s.amount AS amount
         FROM splits s
         JOIN transactions t ON t.id = s.transaction_id
         JOIN accounts a ON a.id = t.account_id
@@ -52,7 +56,7 @@ def _spending_lines(conn, start_date: str, end_date: str) -> list:
         UNION ALL
 
         SELECT t.id AS txn_id, t.txn_date, t.description, t.account_id, a.name AS account_name,
-               NULL AS category, t.amount AS amount
+               NULL AS category, NULL AS category_id, t.amount AS amount
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
         WHERE t.txn_date BETWEEN ? AND ?
@@ -84,6 +88,19 @@ def spending_by_category(conn, start_date: str, end_date: str) -> list[dict]:
         [{"category": k, "amount": v} for k, v in totals.items()],
         key=lambda x: x["amount"],
     )
+
+
+def spending_by_category_id(conn, start_date: str, end_date: str) -> dict[int, int]:
+    """Actual spend per category's own id, NOT rolled up to its parent —
+    what core/budgets.py needs to compare a specific category's budget
+    against its own actual. (spending_by_category, above, rolls a child's
+    spend into its parent's total instead — right for the Dashboard chart,
+    wrong for checking one specific category's budget.)"""
+    totals: dict = defaultdict(int)
+    for r in _spending_lines(conn, start_date, end_date):
+        if r["category_id"] is not None:
+            totals[r["category_id"]] += r["amount"]
+    return dict(totals)
 
 
 def spending_lines_for_category(conn, start_date: str, end_date: str, category: str) -> list[dict]:
