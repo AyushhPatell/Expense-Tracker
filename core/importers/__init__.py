@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from core.fingerprint import assign_occurrence_indexes, compute_fingerprint
-from core.importers.detect import load_profiles
+from core.importers.detect import load_all_profiles
 from core.importers.normalize import normalize_row
 from core.importers.parse import parse_csv
 from core.rules import apply_rules_to_transactions
@@ -13,7 +13,7 @@ def get_profile_for_account(conn, account_id: int) -> dict:
     row = conn.execute("SELECT profile_id FROM accounts WHERE id = ?", (account_id,)).fetchone()
     if row is None:
         raise ValueError(f"Unknown account id {account_id}")
-    profiles = {p["id"]: p for p in load_profiles()}
+    profiles = {p["id"]: p for p in load_all_profiles(conn)}
     profile = profiles.get(row["profile_id"])
     if profile is None:
         raise ValueError(f"No bank profile found for id '{row['profile_id']}'")

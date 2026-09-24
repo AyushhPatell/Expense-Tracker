@@ -2,7 +2,7 @@
 profile'). Previously accounts only ever came from migrations/002_seed.sql —
 this is the first way to add or edit one without touching SQL by hand."""
 
-from core.importers.detect import load_profiles
+from core.importers.detect import load_all_profiles
 
 ACCOUNT_KINDS = ("chequing", "savings", "credit", "other")
 
@@ -15,8 +15,10 @@ def list_accounts(conn, active_only: bool = False) -> list:
     return conn.execute(query).fetchall()
 
 
-def list_profile_choices() -> list[dict]:
-    return [{"id": p["id"], "display_name": p.get("display_name", p["id"])} for p in load_profiles()]
+def list_profile_choices(conn) -> list[dict]:
+    """Built-in bank profiles plus this device's own custom ones, for the
+    account add/edit form's profile picker."""
+    return [{"id": p["id"], "display_name": p.get("display_name", p["id"])} for p in load_all_profiles(conn)]
 
 
 def create_account(conn, name: str, kind: str, profile_id: str) -> int:

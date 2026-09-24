@@ -1,5 +1,8 @@
 import calendar
+import csv as csv_module
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -23,6 +26,16 @@ from core.backup import DEFAULT_KEEP_LAST, create_backup, list_backups, restore_
 from core.config import get_data_dir, get_db_path
 from core.db import init_db
 from core.export import spending_by_category_dataframe, to_csv_bytes, to_excel_bytes, transactions_dataframe
+from core.importers.custom_profiles import (
+    delete_custom_profile,
+    list_custom_profiles,
+    save_custom_profile,
+    unique_profile_id,
+)
+from core.importers.detect import load_profiles
+from core.importers.guess import guess_amount_config, guess_date_column, guess_description_columns
+from core.importers.normalize import normalize_row
+from core.importers.parse import parse_csv
 from core.reports import list_available_months, month_bounds
 from core.settings import get_transfer_keywords, get_transfer_window_days, set_transfer_matching
 
@@ -30,6 +43,14 @@ st.set_page_config(page_title="Settings", layout="wide")
 st.title("Settings")
 
 conn = init_db()
+
+
+def _try_parse_date(value: str, fmt: str) -> bool:
+    try:
+        datetime.strptime(value, fmt)
+        return True
+    except ValueError:
+        return False
 
 
 def _flash(message: str, icon: str = "✅") -> None:
@@ -49,7 +70,7 @@ if "_flash_message" in st.session_state:
 st.subheader("Accounts")
 
 accounts_generation = st.session_state.get("accounts_generation", 0)
-profile_choices = list_profile_choices()
+profile_choices = list_profile_choices(conn)
 profile_ids = [p["id"] for p in profile_choices]
 accounts = list_accounts(conn)
 
@@ -121,6 +142,279 @@ with st.expander("Add an account"):
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Bank profiles — self-service "teach the app a new bank's CSV format"
+# ---------------------------------------------------------------------------
+st.subheader("Bank profiles")
+st.caption(
+    "Teaches the Import page how to read one bank's CSV export — which column is the date, "
+    "which is the amount, and so on. Scotia Chequing and Rogers Mastercard are built in; add "
+    "any other bank here, no code or file editing needed."
+)
+
+custom_profiles = list_custom_profiles(conn)
+if custom_profiles:
+    st.table([{"Name": p["display_name"]} for p in custom_profiles])
+    dpcol1, dpcol2 = st.columns([3, 1])
+    with dpcol1:
+        delete_profile_choice = st.selectbox(
+            "Delete a custom profile", options=[p["id"] for p in custom_profiles],
+            format_func=lambda pid: next(p["display_name"] for p in custom_profiles if p["id"] == pid),
+            key="delete_profile_choice",
+        )
+    with dpcol2:
+        st.write("")
+        st.write("")
+        if st.button("Delete profile"):
+            try:
+                delete_custom_profile(conn, delete_profile_choice)
+                _flash("Deleted bank profile.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+else:
+    st.caption("No custom profiles yet.")
+
+with st.expander("Add a bank profile"):
+    st.caption(
+        "Upload one export file from the bank you want to add. It's parsed right here on your "
+        "device to build the profile — nothing is uploaded anywhere."
+    )
+    sample_file = st.file_uploader("Sample CSV export", type=["csv"], key="profile_wizard_upload")
+
+    if sample_file is not None:
+        file_bytes = sample_file.getvalue()
+
+        wizard_gen = st.session_state.get("profile_wizard_generation", 0)
+        if st.session_state.get("profile_wizard_file_id") != sample_file.file_id:
+            st.session_state["profile_wizard_file_id"] = sample_file.file_id
+            wizard_gen += 1
+            st.session_state["profile_wizard_generation"] = wizard_gen
+
+        text = None
+        used_encoding = None
+        for enc in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                text = file_bytes.decode(enc)
+                used_encoding = enc
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if text is None:
+            st.error("Couldn't decode this file as text — is it really a CSV?")
+        else:
+            raw_lines = text.splitlines()
+            with st.expander("Raw file preview (first 10 lines)"):
+                st.code("\n".join(raw_lines[:10]))
+
+            skip_rows = st.number_input(
+                "Header row is line # (0 = first line)", min_value=0,
+                max_value=max(len(raw_lines) - 1, 0), value=0, step=1,
+                key=f"profile_skip_rows_{wizard_gen}",
+                help="Some exports have a title or account-summary line before the real column "
+                "headers. Increase this until the columns/preview below look right.",
+            )
+
+            reader = csv_module.DictReader(raw_lines[skip_rows:])
+            sample_rows = []
+            for row in reader:
+                if any((v or "").strip() for v in row.values()):
+                    sample_rows.append(row)
+                if len(sample_rows) >= 30:
+                    break
+            headers = list(reader.fieldnames or [])
+
+            if not headers or not sample_rows:
+                st.error("No data rows found with this header-row setting — try a different line number.")
+            else:
+                st.dataframe(pd.DataFrame(sample_rows[:5]), use_container_width=True)
+
+                guess_key = f"profile_guess_{wizard_gen}_{skip_rows}"
+                if guess_key not in st.session_state:
+                    date_col_guess, date_fmt_guess = guess_date_column(sample_rows, headers)
+                    claimed = {date_col_guess} if date_col_guess else set()
+                    amount_guess = guess_amount_config(sample_rows, headers, exclude=claimed)
+                    if amount_guess["mode"] == "single" and amount_guess.get("column"):
+                        claimed.add(amount_guess["column"])
+                    elif amount_guess["mode"] == "debit_credit":
+                        claimed.update(
+                            c for c in (amount_guess.get("debit_column"), amount_guess.get("credit_column")) if c
+                        )
+                    st.session_state[guess_key] = {
+                        "date_col": date_col_guess,
+                        "date_fmt": date_fmt_guess or "%Y-%m-%d",
+                        "amount": amount_guess,
+                        "desc": guess_description_columns(headers, claimed),
+                    }
+                guess = st.session_state[guess_key]
+
+                st.markdown("**Date**")
+                dcol1, dcol2 = st.columns(2)
+                date_column = dcol1.selectbox(
+                    "Date column", options=headers,
+                    index=headers.index(guess["date_col"]) if guess["date_col"] in headers else 0,
+                    key=f"profile_date_col_{wizard_gen}",
+                )
+                date_format = dcol2.text_input(
+                    "Date format", value=guess["date_fmt"], key=f"profile_date_fmt_{wizard_gen}",
+                    help="Python date-format codes — e.g. %Y-%m-%d for 2025-08-17, "
+                    "%m/%d/%Y for 08/17/2025, %d-%b-%Y for 17-Aug-2025.",
+                )
+                sample_date_values = [r.get(date_column, "").strip() for r in sample_rows[:5] if r.get(date_column, "").strip()]
+                if sample_date_values:
+                    parsed_ok = sum(1 for v in sample_date_values if _try_parse_date(v, date_format))
+                    if parsed_ok == len(sample_date_values):
+                        st.success(f"Parsed all {parsed_ok} sample date(s): {', '.join(sample_date_values)}")
+                    else:
+                        st.warning(
+                            f"Only parsed {parsed_ok}/{len(sample_date_values)} sample dates with this "
+                            f"format. Example that failed: '{sample_date_values[0]}'"
+                        )
+
+                posted_options = ["(none)"] + headers
+                posted_date_column = st.selectbox(
+                    "Posted date column (optional)", options=posted_options, key=f"profile_posted_{wizard_gen}"
+                )
+
+                st.markdown("**Description**")
+                description_columns = st.multiselect(
+                    "Description column(s), in order", options=headers,
+                    default=[c for c in guess["desc"] if c in headers], key=f"profile_desc_{wizard_gen}",
+                    help="If you pick more than one, they're joined with ' | ' into a single description.",
+                )
+
+                st.markdown("**Amount**")
+                amount_mode = st.radio(
+                    "This bank's export has...", options=["single", "debit_credit"],
+                    index=0 if guess["amount"]["mode"] == "single" else 1,
+                    format_func=lambda m: "One amount column" if m == "single" else "Separate debit/credit columns",
+                    horizontal=True, key=f"profile_amount_mode_{wizard_gen}",
+                )
+                if amount_mode == "single":
+                    acol1, acol2 = st.columns(2)
+                    amount_column = acol1.selectbox(
+                        "Amount column", options=headers,
+                        index=headers.index(guess["amount"]["column"]) if guess["amount"].get("column") in headers else 0,
+                        key=f"profile_amount_col_{wizard_gen}",
+                    )
+                    invert = acol2.checkbox(
+                        "Flip the sign", value=False, key=f"profile_invert_{wizard_gen}",
+                        help="Check this if a purchase shows as a POSITIVE number in this column. "
+                        "Leave unchecked if purchases are already negative. Check the full preview "
+                        "below to be sure.",
+                    )
+                    amount_cfg = {"mode": "single", "column": amount_column, "invert": invert}
+                else:
+                    acol1, acol2 = st.columns(2)
+                    debit_column = acol1.selectbox(
+                        "Debit / withdrawal column", options=headers,
+                        index=headers.index(guess["amount"]["debit_column"]) if guess["amount"].get("debit_column") in headers else 0,
+                        key=f"profile_debit_{wizard_gen}",
+                    )
+                    credit_column = acol2.selectbox(
+                        "Credit / deposit column", options=headers,
+                        index=headers.index(guess["amount"]["credit_column"]) if guess["amount"].get("credit_column") in headers else 0,
+                        key=f"profile_credit_{wizard_gen}",
+                    )
+                    amount_cfg = {"mode": "debit_credit", "debit_column": debit_column, "credit_column": credit_column}
+
+                with st.expander("Advanced (optional)"):
+                    currency_choice = st.selectbox(
+                        "Currency column", options=["(none)"] + headers, key=f"profile_currency_{wizard_gen}"
+                    )
+                    encoding_options = ["utf-8-sig", "utf-8", "latin-1"]
+                    encoding_choice = st.selectbox(
+                        "File encoding", options=encoding_options,
+                        index=encoding_options.index(used_encoding) if used_encoding in encoding_options else 0,
+                        key=f"profile_encoding_{wizard_gen}",
+                    )
+
+                    st.caption("Skip rows where a column equals a specific value (e.g. skip 'Pending' rows).")
+                    skip_draft_key = f"profile_skipif_{wizard_gen}"
+                    if skip_draft_key not in st.session_state:
+                        st.session_state[skip_draft_key] = []
+                    remove_idx = None
+                    for i, cond in enumerate(st.session_state[skip_draft_key]):
+                        sc1, sc2, sc3, sc4 = st.columns([3, 1, 3, 1])
+                        cond["column"] = sc1.selectbox(
+                            "Column", options=headers,
+                            index=headers.index(cond["column"]) if cond["column"] in headers else 0,
+                            key=f"{skip_draft_key}_col_{cond['_id']}", label_visibility="collapsed",
+                        )
+                        sc2.write("equals")
+                        cond["equals"] = sc3.text_input(
+                            "Value", value=cond["equals"], key=f"{skip_draft_key}_val_{cond['_id']}",
+                            label_visibility="collapsed",
+                        )
+                        if sc4.button("✕", key=f"{skip_draft_key}_rm_{cond['_id']}"):
+                            remove_idx = i
+                    if remove_idx is not None:
+                        st.session_state[skip_draft_key].pop(remove_idx)
+                        st.rerun()
+                    if st.button("Add a skip condition", key=f"{skip_draft_key}_add"):
+                        st.session_state[skip_draft_key].append({"_id": uuid.uuid4().hex, "column": headers[0], "equals": ""})
+                        st.rerun()
+                    skip_if = [
+                        {"column": c["column"], "equals": c["equals"]}
+                        for c in st.session_state[skip_draft_key] if c["equals"]
+                    ]
+
+                parse_cfg = {
+                    "encoding": encoding_choice,
+                    "skip_rows": int(skip_rows),
+                    "date_column": date_column,
+                    "date_format": date_format,
+                    "description_columns": description_columns,
+                    "amount": amount_cfg,
+                    "currency_column": None if currency_choice == "(none)" else currency_choice,
+                    "skip_if": skip_if,
+                }
+                if posted_date_column != "(none)":
+                    parse_cfg["posted_date_column"] = posted_date_column
+
+                draft_profile = {
+                    "id": "_preview", "display_name": "(preview)",
+                    "detect": {"headers": headers}, "parse": parse_cfg,
+                }
+
+                st.markdown("**Full preview** — exactly what Import would create with these settings")
+                preview_records = []
+                try:
+                    preview_raw_rows, _ = parse_csv(file_bytes, draft_profile)
+                    for raw in preview_raw_rows[:10]:
+                        norm = normalize_row(raw, draft_profile)
+                        if norm:
+                            preview_records.append(
+                                {"Date": norm["txn_date"], "Description": norm["description"], "Amount": f"{norm['amount_cents'] / 100:.2f}"}
+                            )
+                    if preview_records:
+                        st.dataframe(preview_records, use_container_width=True)
+                    else:
+                        st.warning("No rows parsed with the current settings — check the date format and column choices above.")
+                except Exception as exc:
+                    st.error(f"Couldn't preview with these settings: {exc}")
+
+                st.markdown("**Save**")
+                display_name_input = st.text_input(
+                    "Bank / account type name", placeholder="e.g. TD Chequing", key=f"profile_name_{wizard_gen}"
+                )
+                if st.button("Save this bank profile", type="primary", disabled=not preview_records):
+                    if not display_name_input.strip():
+                        st.error("Give this profile a name first.")
+                    else:
+                        builtin_ids = {p["id"] for p in load_profiles()}
+                        new_id = unique_profile_id(conn, display_name_input, builtin_ids)
+                        save_custom_profile(conn, new_id, display_name_input.strip(), headers, parse_cfg)
+                        _flash(f"Saved bank profile '{display_name_input.strip()}'. It's available now when adding an account.")
+                        st.session_state.pop("profile_wizard_file_id", None)
+                        st.session_state.pop("profile_wizard_generation", None)
+                        st.session_state.pop(guess_key, None)
+                        st.session_state.pop(skip_draft_key, None)
+                        st.rerun()
 
 st.divider()
 

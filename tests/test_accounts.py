@@ -3,8 +3,8 @@ import pytest
 from core.accounts import create_account, list_accounts, list_profile_choices, update_account
 
 
-def test_list_profile_choices_returns_seeded_bank_profiles():
-    choices = list_profile_choices()
+def test_list_profile_choices_returns_seeded_bank_profiles(db_conn):
+    choices = list_profile_choices(db_conn)
     ids = {c["id"] for c in choices}
     assert {"scotia_chequing", "rogers_mc"}.issubset(ids)
 

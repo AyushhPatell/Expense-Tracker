@@ -9,7 +9,7 @@ import streamlit as st
 from core.coverage import get_coverage
 from core.db import init_db
 from core.importers import import_file
-from core.importers.detect import detect_profile, load_profiles
+from core.importers.detect import detect_profile, load_all_profiles
 from core.importers.normalize import normalize_row
 from core.importers.parse import parse_csv
 
@@ -36,7 +36,7 @@ if not accounts:
     st.stop()
 
 account_by_id = {a["id"]: a for a in accounts}
-profile_by_id = {p["id"]: p for p in load_profiles()}
+profile_by_id = {p["id"]: p for p in load_all_profiles(conn)}
 
 
 def _sniff_headers(file_bytes: bytes) -> list[str]:
@@ -59,7 +59,7 @@ if uploaded_files:
     for uf in uploaded_files:
         file_bytes = uf.getvalue()
         headers = _sniff_headers(file_bytes)
-        matches = detect_profile(headers)
+        matches = detect_profile(headers, profiles=list(profile_by_id.values()))
         match_ids = {m["id"] for m in matches}
         candidate_account_ids = [a["id"] for a in accounts if a["profile_id"] in match_ids]
 
